@@ -5,7 +5,7 @@ This is a simple [userscript](https://en.wikipedia.org/wiki/Userscript) to add s
 ### Features
 
 * Automatically changes activity items order to Oldest first.
-* Autoamtically loads (expands) all newer activity items.
+* Automatically collapses GitLab-Jira Integration comments.
 * Adds a floating button at the right bottom corner to quickly scroll to the top or bottom of the issue.
 
 All features can be switched on and off using the extension meniu item "Jira Tweaks configuration" (screenshot from [Violentmonkey](https://violentmonkey.github.io/)):

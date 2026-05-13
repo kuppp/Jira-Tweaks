@@ -1,14 +1,13 @@
 // ==UserScript==
 // @name         Jira Tweaks
 // @namespace    https://github.com/Cigaras/Jira-Tweaks
-// @version      1.0.7
+// @version      1.1.0
 // @description  Various Jira tweaks
 // @author       Valdas V.
 // @homepage     https://github.com/Cigaras/Jira-Tweaks
 // @match        https://*/jira/*
 // @icon         https://jira.atlassian.com/favicon.ico
-// @require      https://raw.githubusercontent.com/odyniec/MonkeyConfig/51456c3/monkeyconfig.js
-// @require      http://code.jquery.com/jquery-latest.js
+// @require      https://raw.github.com/odyniec/MonkeyConfig/master/monkeyconfig.js
 // @grant        GM_registerMenuCommand
 // @grant        GM_addStyle
 // @grant        GM_getValue
@@ -27,7 +26,7 @@
                 type: 'checkbox',
                 default: true
             },
-            load_newer_activity_items: {
+            collapse_gitlab_comments: {
                 type: 'checkbox',
                 default: true
             },
@@ -38,15 +37,55 @@
         }
     });
 
-    // Define shift click
-    var shiftClick = jQuery.Event("click");
-    shiftClick.shiftKey = true;
+    // Auto-sort activity to oldest first, stop if user manually clicks the sort button
+    var autoSortEnabled = true;
+    var autoSortClicking = false;
+    var sortButtonListenerAdded = false;
 
-    // Find button "Load newer" and shift click it
-    function loadActivityItems(activityModule) {
-        const loadButton = $('button[data-fetch-mode="newer"]');
-        if (loadButton && loadButton.is(':visible')) {
-            loadButton.trigger(shiftClick);
+    // Collapse expanded GitLab-Jira Integration comments using JIRA's native twixi toggle.
+    // Stops auto-collapsing for the session if the user manually expands any of them.
+    var autoCollapseGitlab = true;
+
+    function collapseGitlabComments(activityModule) {
+        if (!cfg.get('collapse_gitlab_comments')) return;
+        if (!autoCollapseGitlab) return;
+
+        const scrollEl = document.querySelector('.issue-view, .detail-panel') || document.documentElement;
+        const savedScrollTop = scrollEl.scrollTop;
+        const savedWindowScrollY = window.scrollY;
+        const savedFocus = document.activeElement;
+        let didCollapse = false;
+
+        activityModule.querySelectorAll('.activity-comment.twixi-block.expanded').forEach(function(comment) {
+            if (!comment.querySelector('a.user-hover[rel="gitlab"]')) return;
+            if (comment.dataset.jtGitlabHandled) return;
+
+            comment.dataset.jtGitlabHandled = 'true';
+
+            const expandBtn = comment.querySelector('.twixi-wrap.concise button.twixi');
+            if (expandBtn) {
+                expandBtn.addEventListener('click', function() {
+                    autoCollapseGitlab = false;
+                }, { once: true });
+            }
+
+            const collapseBtn = comment.querySelector('button.twixi.aui-iconfont-expanded');
+            if (collapseBtn) {
+                collapseBtn.click();
+                didCollapse = true;
+            }
+        });
+
+        if (didCollapse) {
+            requestAnimationFrame(function() {
+                scrollEl.scrollTop = savedScrollTop;
+                window.scrollTo(0, savedWindowScrollY);
+                if (savedFocus && savedFocus !== document.body) {
+                    savedFocus.focus();
+                } else {
+                    document.activeElement.blur();
+                }
+            });
         }
     }
 
@@ -112,27 +151,30 @@
         const activityModule = document.getElementById('activitymodule');
         if (activityModule) {
             if (cfg.get('change_activity_items_order_to_oldest_first')) {
-                const sortButton = activityModule.querySelector("#sort-button[data-order='asc']");
+                const sortButton = activityModule.querySelector('#sort-button');
                 if (sortButton) {
-                    sortButton.click();
-                } else {
-                    if (cfg.get('load_newer_activity_items')) {
-                        loadActivityItems(activityModule);
+                    if (!sortButtonListenerAdded) {
+                        sortButtonListenerAdded = true;
+                        sortButton.addEventListener('click', function() {
+                            if (!autoSortClicking) autoSortEnabled = false;
+                        });
                     }
-                }
-            } else {
-                if (cfg.get('load_newer_activity_items')) {
-                    loadActivityItems(activityModule);
+                    if (autoSortEnabled && sortButton.dataset.order === 'asc') {
+                        autoSortClicking = true;
+                        sortButton.click();
+                        autoSortClicking = false;
+                    }
                 }
             }
+            collapseGitlabComments(activityModule);
+            var scrollButton = document.getElementById('scroll-button');
             if (cfg.get('add_quick_scroll_button')) {
                 var issueContainer = document.querySelector(".issue-view, .detail-panel");
-                if (issueContainer) {
-                    var scrollButton = document.getElementById('scroll-button');
-                    if (!scrollButton) {
-                        addScrollButton(issueContainer);
-                    }
+                if (issueContainer && !scrollButton) {
+                    addScrollButton(issueContainer);
                 }
+            } else if (scrollButton) {
+                scrollButton.remove();
             }
         }
     }, 1000);
