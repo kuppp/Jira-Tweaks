@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Jira Tweaks
 // @namespace    https://github.com/Cigaras/Jira-Tweaks
-// @version      1.1.0
+// @version      1.2.0
 // @description  Various Jira tweaks
 // @author       Valdas V.
 // @homepage     https://github.com/Cigaras/Jira-Tweaks
@@ -46,29 +46,78 @@
     // Stops auto-collapsing for the session if the user manually expands any of them.
     var autoCollapseGitlab = true;
 
+    // --- Focused-comment handling ---
+    // When the page is opened on a focused comment (?focusedId=NNN / #comment-NNN),
+    // Jira itself scrolls to that comment and keeps it there. Collapsing GitLab
+    // comments via the twixi button scrolls the toggled comment into view and
+    // leaves focus on its collapse button, which drifts the view:
+    //   * With a focused comment: re-anchor to the focused comment after collapse.
+    //   * Without a focused comment: return to the top after collapse.
+    // In both cases we then move focus to the project name link so the focus ring
+    // leaves the last collapse button, matching JIRA's native behaviour. We back
+    // off as soon as the user scrolls, so we never fight them.
+    var focusedCommentId = (function() {
+        var sources = [];
+        try { if (location.hash) sources.push(location.hash); } catch (e) {}
+        try { if (location.search) sources.push(location.search); } catch (e) {}
+        try {
+            var nav = performance.getEntriesByType('navigation');
+            if (nav && nav[0] && nav[0].name) sources.push(nav[0].name);
+        } catch (e) {}
+        try { if (document.referrer) sources.push(document.referrer); } catch (e) {}
+        for (var i = 0; i < sources.length; i++) {
+            var m = sources[i].match(/focusedId=(\d+)/) || sources[i].match(/comment-(\d+)/);
+            if (m) return m[1];
+        }
+        return null;
+    })();
+
+    var userHasScrolled = false;
+
+    function restoreScrollAfterCollapse() {
+        if (userHasScrolled) return;
+        var scrollEl = document.querySelector('.issue-view, .detail-panel') || document.documentElement;
+
+        if (focusedCommentId) {
+            // Re-anchor to the focused comment (collapsing items above it shifts it).
+            var el = document.getElementById('comment-' + focusedCommentId);
+            if (el) {
+                var scTop = scrollEl.getBoundingClientRect ? scrollEl.getBoundingClientRect().top : 0;
+                if (Math.abs(el.getBoundingClientRect().top - scTop) >= 8) {
+                    el.scrollIntoView({ block: 'start' });
+                }
+            }
+        } else {
+            // No focused comment -> the collapse side effect drifts the view down,
+            // so return to the top.
+            scrollEl.scrollTop = 0;
+            window.scrollTo(0, 0);
+        }
+
+        // In both cases move focus off the last collapse button to the project
+        // name link (preventScroll keeps the scroll position we just set).
+        var projectLink = document.getElementById('project-name-val');
+        if (projectLink) {
+            projectLink.focus({ preventScroll: true });
+        }
+    }
+
     function collapseGitlabComments(activityModule) {
         if (!cfg.get('collapse_gitlab_comments')) return;
         if (!autoCollapseGitlab) return;
 
-        const scrollEl = document.querySelector('.issue-view, .detail-panel') || document.documentElement;
-        const savedScrollTop = scrollEl.scrollTop;
-        const savedWindowScrollY = window.scrollY;
-        const savedFocus = document.activeElement;
         let didCollapse = false;
 
         activityModule.querySelectorAll('.activity-comment.twixi-block.expanded').forEach(function(comment) {
             if (!comment.querySelector('a.user-hover[rel="gitlab"]')) return;
             if (comment.dataset.jtGitlabHandled) return;
-
             comment.dataset.jtGitlabHandled = 'true';
-
             const expandBtn = comment.querySelector('.twixi-wrap.concise button.twixi');
             if (expandBtn) {
                 expandBtn.addEventListener('click', function() {
                     autoCollapseGitlab = false;
                 }, { once: true });
             }
-
             const collapseBtn = comment.querySelector('button.twixi.aui-iconfont-expanded');
             if (collapseBtn) {
                 collapseBtn.click();
@@ -76,22 +125,15 @@
             }
         });
 
+        // After collapsing, fix the scroll drift the twixi toggle causes:
+        // anchor to the focused comment, or return to the top if there is none.
         if (didCollapse) {
-            requestAnimationFrame(function() {
-                scrollEl.scrollTop = savedScrollTop;
-                window.scrollTo(0, savedWindowScrollY);
-                if (savedFocus && savedFocus !== document.body) {
-                    savedFocus.focus();
-                } else {
-                    document.activeElement.blur();
-                }
-            });
+            requestAnimationFrame(restoreScrollAfterCollapse);
         }
     }
 
     // Add scroll button
     function addScrollButton(issueContainer) {
-
         // Create the floating button element
         var scrollButton = document.createElement('button');
         scrollButton.id = 'scroll-button';
@@ -146,6 +188,13 @@
         document.body.appendChild(scrollButton);
     }
 
+    // Detect genuine user scrolling so we stop adjusting scroll once they take over.
+    document.addEventListener('wheel', function() { userHasScrolled = true; }, { passive: true });
+    document.addEventListener('touchmove', function() { userHasScrolled = true; }, { passive: true });
+    document.addEventListener('keydown', function(e) {
+        if ([32, 33, 34, 35, 36, 38, 40].indexOf(e.keyCode) !== -1) userHasScrolled = true;
+    }, true);
+
     // Main function, executed every second
     setInterval(() => {
         const activityModule = document.getElementById('activitymodule');
@@ -166,7 +215,9 @@
                     }
                 }
             }
+
             collapseGitlabComments(activityModule);
+
             var scrollButton = document.getElementById('scroll-button');
             if (cfg.get('add_quick_scroll_button')) {
                 var issueContainer = document.querySelector(".issue-view, .detail-panel");
@@ -178,5 +229,4 @@
             }
         }
     }, 1000);
-
 })();
