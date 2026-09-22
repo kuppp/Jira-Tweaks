@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         Jira Tweaks
 // @namespace    https://github.com/Cigaras/Jira-Tweaks
-// @version      1.2.0
+// @version      1.3.0
 // @description  Various Jira tweaks
-// @author       Valdas V.
+// @author       kuppp
 // @homepage     https://github.com/Cigaras/Jira-Tweaks
 // @match        https://*/jira/*
 // @icon         https://jira.atlassian.com/favicon.ico
@@ -13,10 +13,10 @@
 // @grant        GM_getValue
 // @grant        GM_setValue
 // ==/UserScript==
-
+ 
 (function() {
     'use strict';
-
+ 
     // Config
     var cfg = new MonkeyConfig({
         title: 'Jira Tweaks configuration',
@@ -36,26 +36,25 @@
             }
         }
     });
-
+ 
     // Auto-sort activity to oldest first, stop if user manually clicks the sort button
     var autoSortEnabled = true;
     var autoSortClicking = false;
     var sortButtonListenerAdded = false;
-
-    // Collapse expanded GitLab-Jira Integration comments using JIRA's native twixi toggle.
-    // Stops auto-collapsing for the session if the user manually expands any of them.
-    var autoCollapseGitlab = true;
-
+ 
+    // Hide GitLab-Jira Integration comments entirely (display: none), rather than
+    // collapsing them via JIRA's native twixi toggle. Each comment is hidden once
+    // (tracked via a dataset flag) and stays hidden — there is no toggle left in
+    // the UI to bring it back, so unlike the old collapse behaviour this does not
+    // watch for the user manually re-expanding anything.
+ 
     // --- Focused-comment handling ---
     // When the page is opened on a focused comment (?focusedId=NNN / #comment-NNN),
-    // Jira itself scrolls to that comment and keeps it there. Collapsing GitLab
-    // comments via the twixi button scrolls the toggled comment into view and
-    // leaves focus on its collapse button, which drifts the view:
-    //   * With a focused comment: re-anchor to the focused comment after collapse.
-    //   * Without a focused comment: return to the top after collapse.
-    // In both cases we then move focus to the project name link so the focus ring
-    // leaves the last collapse button, matching JIRA's native behaviour. We back
-    // off as soon as the user scrolls, so we never fight them.
+    // Jira itself scrolls to that comment and keeps it there. Hiding GitLab
+    // comments above it shifts the layout the same way collapsing used to:
+    //   * With a focused comment: re-anchor to the focused comment after hiding.
+    //   * Without a focused comment: return to the top after hiding.
+    // We back off as soon as the user scrolls, so we never fight them.
     var focusedCommentId = (function() {
         var sources = [];
         try { if (location.hash) sources.push(location.hash); } catch (e) {}
@@ -71,15 +70,15 @@
         }
         return null;
     })();
-
+ 
     var userHasScrolled = false;
-
-    function restoreScrollAfterCollapse() {
+ 
+    function restoreScrollAfterHide() {
         if (userHasScrolled) return;
         var scrollEl = document.querySelector('.issue-view, .detail-panel') || document.documentElement;
-
+ 
         if (focusedCommentId) {
-            // Re-anchor to the focused comment (collapsing items above it shifts it).
+            // Re-anchor to the focused comment (hiding items above it shifts it).
             var el = document.getElementById('comment-' + focusedCommentId);
             if (el) {
                 var scTop = scrollEl.getBoundingClientRect ? scrollEl.getBoundingClientRect().top : 0;
@@ -88,50 +87,32 @@
                 }
             }
         } else {
-            // No focused comment -> the collapse side effect drifts the view down,
-            // so return to the top.
+            // No focused comment -> hiding drifts the view, so return to the top.
             scrollEl.scrollTop = 0;
             window.scrollTo(0, 0);
         }
-
-        // In both cases move focus off the last collapse button to the project
-        // name link (preventScroll keeps the scroll position we just set).
-        var projectLink = document.getElementById('project-name-val');
-        if (projectLink) {
-            projectLink.focus({ preventScroll: true });
-        }
     }
-
-    function collapseGitlabComments(activityModule) {
+ 
+    function hideGitlabComments(activityModule) {
         if (!cfg.get('collapse_gitlab_comments')) return;
-        if (!autoCollapseGitlab) return;
-
-        let didCollapse = false;
-
-        activityModule.querySelectorAll('.activity-comment.twixi-block.expanded').forEach(function(comment) {
+ 
+        let didHide = false;
+ 
+        activityModule.querySelectorAll('.activity-comment.twixi-block').forEach(function(comment) {
             if (!comment.querySelector('a.user-hover[rel="gitlab"]')) return;
             if (comment.dataset.jtGitlabHandled) return;
             comment.dataset.jtGitlabHandled = 'true';
-            const expandBtn = comment.querySelector('.twixi-wrap.concise button.twixi');
-            if (expandBtn) {
-                expandBtn.addEventListener('click', function() {
-                    autoCollapseGitlab = false;
-                }, { once: true });
-            }
-            const collapseBtn = comment.querySelector('button.twixi.aui-iconfont-expanded');
-            if (collapseBtn) {
-                collapseBtn.click();
-                didCollapse = true;
-            }
+            comment.style.display = 'none';
+            didHide = true;
         });
-
-        // After collapsing, fix the scroll drift the twixi toggle causes:
-        // anchor to the focused comment, or return to the top if there is none.
-        if (didCollapse) {
-            requestAnimationFrame(restoreScrollAfterCollapse);
+ 
+        // After hiding, fix the scroll drift removing content causes: anchor to
+        // the focused comment, or return to the top if there is none.
+        if (didHide) {
+            requestAnimationFrame(restoreScrollAfterHide);
         }
     }
-
+ 
     // Add scroll button
     function addScrollButton(issueContainer) {
         // Create the floating button element
@@ -143,17 +124,17 @@
         scrollButton.style.right = '37px';
         scrollButton.style.zIndex = '9999';
         scrollButton.title = 'Scroll to bottom';
-
+ 
         // Create the button label element
         var scrollButtonLabel = document.createElement('span');
         scrollButtonLabel.classList.add('aui-icon'); // https://aui.atlassian.com/aui/9.1/docs/icons.html
         scrollButtonLabel.classList.add('aui-icon-small');
         scrollButtonLabel.classList.add('aui-iconfont-chevron-down-circle');
         scrollButtonLabel.innerHTML = '▼';
-
+ 
         // Append the label to the button
         scrollButton.appendChild(scrollButtonLabel);
-
+ 
         // Add button event listener
         scrollButton.addEventListener('click', function() {
             if (issueContainer.scrollTop < (issueContainer.scrollHeight - issueContainer.clientHeight)) {
@@ -168,7 +149,7 @@
                 });
             }
         });
-
+ 
         // Add scroll event listener
         issueContainer.addEventListener('scroll', function() {
             if (issueContainer.scrollTop < (issueContainer.scrollHeight - issueContainer.clientHeight)) {
@@ -183,18 +164,18 @@
                 scrollButtonLabel.innerHTML = '▲';
             }
         });
-
+ 
         // Append the button to the document body
         document.body.appendChild(scrollButton);
     }
-
+ 
     // Detect genuine user scrolling so we stop adjusting scroll once they take over.
     document.addEventListener('wheel', function() { userHasScrolled = true; }, { passive: true });
     document.addEventListener('touchmove', function() { userHasScrolled = true; }, { passive: true });
     document.addEventListener('keydown', function(e) {
         if ([32, 33, 34, 35, 36, 38, 40].indexOf(e.keyCode) !== -1) userHasScrolled = true;
     }, true);
-
+ 
     // Main function, executed every second
     setInterval(() => {
         const activityModule = document.getElementById('activitymodule');
@@ -215,9 +196,9 @@
                     }
                 }
             }
-
-            collapseGitlabComments(activityModule);
-
+ 
+            hideGitlabComments(activityModule);
+ 
             var scrollButton = document.getElementById('scroll-button');
             if (cfg.get('add_quick_scroll_button')) {
                 var issueContainer = document.querySelector(".issue-view, .detail-panel");
