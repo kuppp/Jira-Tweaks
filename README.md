@@ -15,5 +15,5 @@ All features can be switched on and off using the extension meniu item "Jira Twe
 ### How to install
 
 1. Install userscript manager of your choise, like [Tampermonkey](https://www.tampermonkey.net/) or [Violentmonkey](https://violentmonkey.github.io/).
-2. Open raw Jira-Tweaks.user.js file on github.com, a direct link: [https://github.com/Cigaras/Jira-Tweaks/raw/main/Jira-Tweaks.user.js](https://github.com/Cigaras/Jira-Tweaks/raw/main/Jira-Tweaks.user.js).
+2. Open raw Jira-Tweaks.user.js file on github.com, a direct link: [https://github.com/Kuppp/Jira-Tweaks/raw/main/Jira-Tweaks.user.js](https://github.com/Kuppp/Jira-Tweaks/raw/main/Jira-Tweaks.user.js).
 3. Userscript manager should pick it up automatically, just confirm the installation.
